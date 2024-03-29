@@ -202,7 +202,7 @@ myynh_install_immich() {
 		ynh_exec_warn_less "$ynh_npm" install sharp
 
 	# Use 127.0.0.1 for microservices
-		sed -i -e "s@app.listen(port)@app.listen(port, '127.0.0.1')@g" "$install_dir/app/dist/microservices/main.js"
+		sed -i -e "s@app.listen(port)@app.listen(port, '127.0.0.1')@g" "$install_dir/app/dist/main.js"
 
 	# Cleanup
 		ynh_secure_remove --file="$tmpdir"
