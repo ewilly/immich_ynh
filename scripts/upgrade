@@ -3,7 +3,6 @@
 #=================================================
 # IMPORT GENERIC HELPERS
 #=================================================
-
 source _common.sh
 source /usr/share/yunohost/helpers
 
@@ -72,12 +71,6 @@ ynh_safe_rm "$install_dir/.config"
 source_dir="$install_dir/source"
 ynh_setup_source --source_id="main" --dest_dir="$source_dir" --full_replace
 
-#=================================================
-# INSTALL PACKAGES
-#=================================================
-ynh_script_progression "Installing additionnal packages (if needed)..."
-
-myynh_install_postgresql_packages
 
 #=================================================
 # UPDATE A POSTGRESQL DATABASE
@@ -86,21 +79,7 @@ ynh_script_progression "Updating a PostgreSQL database..."
 
 if [[ $YNH_DEBIAN_VERSION == "bookworm" ]]
 then
-	myynh_set_default_psql_cluster_to_debian_default
-elif [[ $YNH_DEBIAN_VERSION == "trixie" ]]
-then
-	# Check if the db is not yet on trixie cluster and if no migrate it (aka dumb and restore the db to 17 + delete the db on 16)
-	if [[ $(ynh_app_setting_get --key=db_cluster) != "$psql_trixie/main" ]]
-	then
-		# Dump db on old cluster
-		myynh_dump_psql_db --cluster="$psql_bookworm/main"
-		# Create db on new cluster
-		myynh_create_psql_db --cluster="$psql_trixie/main"
-		# Restore db on new cluster
-		myynh_restore_psql_db --cluster="$psql_trixie/main"
-		# Drop db on old cluster
-		myynh_drop_psql_db --cluster="$psql_bookworm/main"
-	fi
+	myynh_provision_postgresql
 fi
 
 myynh_update_psql_db
