@@ -11,79 +11,37 @@ on:
         description: 'vips version'
         required: true
         default: '8.17.3'
+      libs_dir:
+        description: 'Libraries installation directory'
+        required: true
+        default: '/var/www/immich/vips'
+      debian_versions:
+        description: 'Debian versions to build (comma-separated: bookworm, trixie, or bookworm,trixie)'
+        required: true
+        default: 'bookworm'
 
 jobs:
-  # build-bookworm:
-  #   runs-on: ubuntu-latest
-  #   container:
-  #     image: debian:bookworm-slim
-  #   steps:
-  #     - name: Install dependencies
-  #       run: |
-  #         apt-get update
-  #         apt-get install -y \
-  #           build-essential \
-  #           cmake \
-  #           pkg-config \
-  #           wget \
-  #           tar \
-  #           xz-utils \
-  #           libglib2.0-dev \
-  #           libexpat1-dev \
-  #           libjpeg-dev \
-  #           libpng-dev \
-  #           libwebp-dev \
-  #           libtiff-dev \
-  #           libexif-dev \
-  #           libde265-dev \
-  #           libx265-dev \
-  #           libaom-dev \
-  #           ninja-build \
-  #           meson
-  # 
-  #     - name: Create build directory
-  #       run: mkdir -p /vips
-  # 
-  #     - name: Download and build libheif
-  #       run: |
-  #         cd /tmp
-  #         wget https://github.com/strukturag/libheif/releases/download/v${{ github.event.inputs.libheif_version }}/libheif-${{ github.event.inputs.libheif_version }}.tar.gz
-  #         tar xzf libheif-${{ github.event.inputs.libheif_version }}.tar.gz
-  #         cd libheif-${{ github.event.inputs.libheif_version }}
-  #         mkdir build
-  #         cd build
-  #         cmake --preset=release ..
-  #         make -j$(nproc)
-  #         make install DESTDIR=/vips
-  #         make install
-  # 
-  #     - name: Download and build libvips
-  #       run: |
-  #         cd /tmp
-  #         wget https://github.com/libvips/libvips/releases/download/v${{ github.event.inputs.vips_version }}/vips-${{ github.event.inputs.vips_version }}.tar.xz
-  #         tar xf vips-${{ github.event.inputs.vips_version }}.tar.xz
-  #         cd vips-${{ github.event.inputs.vips_version }}
-  #         meson setup build --prefix=/usr --buildtype=release
-  #         cd build
-  #         meson compile
-  #         meson install --destdir=/vips
-  # 
-  #     - name: Create tarball
-  #       run: |
-  #         cd /
-  #         tar czf vips-${{ github.event.inputs.vips_version }}-bookworm.tar.gz vips
-  # 
-  #     - name: Upload artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: vips-bookworm
-  #         path: /vips-${{ github.event.inputs.vips_version }}-bookworm.tar.gz
-
-  build-trixie:
+  prepare:
     runs-on: ubuntu-latest
-    # needs: build-bookworm
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set matrix
+        id: set-matrix
+        run: |
+          VERSIONS="${{ github.event.inputs.debian_versions }}"
+          # Convert comma-separated string to JSON array
+          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  build:
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      matrix:
+        debian_version: ${{ fromJson(needs.prepare.outputs.matrix) }}
     container:
-      image: debian:trixie-slim
+      image: debian:${{ matrix.debian_version }}-slim
     steps:
       - name: Install dependencies
         run: |
@@ -103,73 +61,82 @@ jobs:
             libtiff-dev \
             libexif-dev \
             libde265-dev \
-            libx265-dev \
+            libdav1d-dev \
+            libsharpyuv-dev \
             libaom-dev \
             ninja-build \
-            meson
+            meson \
+            jq
 
       - name: Create build directory
-        run: mkdir -p /vips
+        run: mkdir -p ${{ github.event.inputs.libs_dir }}
 
       - name: Download and build libheif
         run: |
+          libs_dir="${{ github.event.inputs.libs_dir }}"
           cd /tmp
           wget https://github.com/strukturag/libheif/releases/download/v${{ github.event.inputs.libheif_version }}/libheif-${{ github.event.inputs.libheif_version }}.tar.gz
           tar xzf libheif-${{ github.event.inputs.libheif_version }}.tar.gz
           cd libheif-${{ github.event.inputs.libheif_version }}
           mkdir build
           cd build
-          cmake --preset=release ..
-          make -j$(nproc)
-          make install DESTDIR=/vips
+          cmake --preset=release-noplugins \
+            -DCMAKE_INSTALL_PREFIX="$libs_dir" \
+            -DWITH_DAV1D=ON \
+            -DENABLE_PARALLEL_TILE_DECODING=ON \
+            -DWITH_LIBSHARPYUV=ON \
+            -DWITH_LIBDE265=ON \
+            -DWITH_AOM_DECODER=OFF \
+            -DWITH_AOM_ENCODER=ON \
+            -DWITH_X265=OFF \
+            -DWITH_EXAMPLES=OFF \
+            ..
+          make -j "$(nproc)"
           make install
 
       - name: Download and build libvips
         run: |
+          libs_dir="${{ github.event.inputs.libs_dir }}"
           cd /tmp
           wget https://github.com/libvips/libvips/releases/download/v${{ github.event.inputs.vips_version }}/vips-${{ github.event.inputs.vips_version }}.tar.xz
           tar xf vips-${{ github.event.inputs.vips_version }}.tar.xz
           cd vips-${{ github.event.inputs.vips_version }}
-          meson setup build --prefix=/usr --buildtype=release
+          meson setup build --buildtype=release \
+            --prefix="$libs_dir" \
+            --libdir=lib \
+            -Dintrospection=disabled \
+            -Dtiff=disabled
           cd build
-          meson compile
-          meson install --destdir=/vips
+          ninja install
 
       - name: Create tarball
         run: |
-          cd /
-          tar czf vips-${{ github.event.inputs.vips_version }}-trixie.tar.gz vips
+          cd "$(dirname ${{ github.event.inputs.libs_dir }})"
+          tar czf vips-${{ github.event.inputs.vips_version }}-${{ matrix.debian_version }}.tar.gz "$(basename ${{ github.event.inputs.libs_dir }})"
+          mv vips-${{ github.event.inputs.vips_version }}-${{ matrix.debian_version }}.tar.gz /tmp/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vips-trixie
-          path: /vips-${{ github.event.inputs.vips_version }}-trixie.tar.gz
+          name: vips-${{ matrix.debian_version }}
+          path: /tmp/vips-${{ github.event.inputs.vips_version }}-${{ matrix.debian_version }}.tar.gz
 
-  create-release:
+  release:
     runs-on: ubuntu-latest
-    # needs: [build-bookworm, build-trixie]
-    needs: build-trixie
+    needs: [prepare, build]
     permissions:
       contents: write
     steps:
-      # - name: Download bookworm artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: vips-bookworm
-
-      - name: Download trixie artifact
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: vips-trixie
+          path: artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ github.event.inputs.vips_version }}
           name: vips ${{ github.event.inputs.vips_version }}
-          # files: |
-          #   vips-${{ github.event.inputs.vips_version }}-bookworm.tar.gz
-          #   vips-${{ github.event.inputs.vips_version }}-trixie.tar.gz
-          files: |
-            vips-${{ github.event.inputs.vips_version }}-trixie.tar.gz
+          files: artifacts/**/*.tar.gz
+          draft: false
+          prerelease: false
