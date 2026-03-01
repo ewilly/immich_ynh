@@ -3,14 +3,6 @@ name: Build libvips with libheif
 on:
   workflow_dispatch:
     inputs:
-      libheif_version:
-        description: 'libheif version'
-        required: true
-        default: '1.20.2'
-      vips_version:
-        description: 'vips version'
-        required: true
-        default: '8.17.3'
       libs_dir:
         description: 'Libraries installation directory'
         required: true
@@ -25,7 +17,24 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      libheif_version: ${{ steps.get-versions.outputs.libheif_version }}
+      vips_version: ${{ steps.get-versions.outputs.vips_version }}
     steps:
+      - name: Get versions from immich-app/base-images
+        id: get-versions
+        run: |
+          # Get libheif version
+          LIBHEIF_JSON=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libheif.json)
+          LIBHEIF_VERSION=$(echo "$LIBHEIF_JSON" | jq -r '.version')
+          echo "libheif_version=$LIBHEIF_VERSION" >> $GITHUB_OUTPUT
+          echo "libheif version: $LIBHEIF_VERSION"
+          
+          # Get libvips version
+          VIPS_JSON=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libvips.json)
+          VIPS_VERSION=$(echo "$VIPS_JSON" | jq -r '.version')
+          echo "vips_version=$VIPS_VERSION" >> $GITHUB_OUTPUT
+          echo "vips version: $VIPS_VERSION"
+
       - name: Set matrix
         id: set-matrix
         run: |
@@ -79,9 +88,9 @@ jobs:
         run: |
           libs_dir="${{ github.event.inputs.libs_dir }}"
           cd /tmp
-          wget https://github.com/strukturag/libheif/releases/download/v${{ github.event.inputs.libheif_version }}/libheif-${{ github.event.inputs.libheif_version }}.tar.gz
-          tar xzf libheif-${{ github.event.inputs.libheif_version }}.tar.gz
-          cd libheif-${{ github.event.inputs.libheif_version }}
+          wget https://github.com/strukturag/libheif/releases/download/v${{ needs.prepare.outputs.libheif_version }}/libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz
+          tar xzf libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz
+          cd libheif-${{ needs.prepare.outputs.libheif_version }}
           mkdir build
           cd build
           cmake --preset=release-noplugins \
@@ -102,9 +111,9 @@ jobs:
         run: |
           libs_dir="${{ github.event.inputs.libs_dir }}"
           cd /tmp
-          wget https://github.com/libvips/libvips/releases/download/v${{ github.event.inputs.vips_version }}/vips-${{ github.event.inputs.vips_version }}.tar.xz
-          tar xf vips-${{ github.event.inputs.vips_version }}.tar.xz
-          cd vips-${{ github.event.inputs.vips_version }}
+          wget https://github.com/libvips/libvips/releases/download/v${{ needs.prepare.outputs.vips_version }}/vips-${{ needs.prepare.outputs.vips_version }}.tar.xz
+          tar xf vips-${{ needs.prepare.outputs.vips_version }}.tar.xz
+          cd vips-${{ needs.prepare.outputs.vips_version }}
           meson setup build --buildtype=release \
             --prefix="$libs_dir" \
             --libdir=lib \
@@ -116,14 +125,14 @@ jobs:
       - name: Create tarball
         run: |
           cd "$(dirname ${{ github.event.inputs.libs_dir }})"
-          tar czf vips-${{ github.event.inputs.vips_version }}-${{ matrix.debian_version }}.tar.gz "$(basename ${{ github.event.inputs.libs_dir }})"
-          mv vips-${{ github.event.inputs.vips_version }}-${{ matrix.debian_version }}.tar.gz /tmp/
+          tar czf vips-${{ needs.prepare.outputs.vips_version }}-heif-${{ needs.prepare.outputs.libheif_version }}-${{ matrix.debian_version }}.tar.gz "$(basename ${{ github.event.inputs.libs_dir }})"
+          mv vips-${{ needs.prepare.outputs.vips_version }}-heif-${{ needs.prepare.outputs.libheif_version }}-${{ matrix.debian_version }}.tar.gz /tmp/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: vips-${{ matrix.debian_version }}
-          path: /tmp/vips-${{ github.event.inputs.vips_version }}-${{ matrix.debian_version }}.tar.gz
+          path: /tmp/vips-${{ needs.prepare.outputs.vips_version }}-heif-${{ needs.prepare.outputs.libheif_version }}-${{ matrix.debian_version }}.tar.gz
 
   release:
     runs-on: ubuntu-latest
@@ -139,8 +148,12 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ github.event.inputs.vips_version }}
-          name: vips ${{ github.event.inputs.vips_version }}
-          files: artifacts/**/*.tar.gz
+          tag_name: vips-${{ needs.prepare.outputs.vips_version }}-heif-${{ needs.prepare.outputs.libheif_version }}
+          name: vips ${{ needs.prepare.outputs.vips_version }} with libheif ${{ needs.prepare.outputs.libheif_version }}
+          body: |
+            Build with build_libvips_with_libheif.yml github workflow with:
+            libheif: ${{ needs.prepare.outputs.libheif_version }}
+            libvips: ${{ needs.prepare.outputs.vips_version }}
+          files: artifacts/**/*
           draft: false
           prerelease: false
