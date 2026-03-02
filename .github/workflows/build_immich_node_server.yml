@@ -109,20 +109,30 @@ jobs:
       NODE_OPTIONS: "--max_old_space_size=6144"
       NODE_ENV: production
       CURL_OPTS: "--fail --location --retry 3 --retry-delay 2"
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+      CI: 1
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Fix base PATH + base tools
+        run: |
+          apt-get update
+          apt-get install -y curl ca-certificates gpg
 
-      - uses: pnpm/action-setup@v4
-        name: Install pnpm
-        with:
-          version: ${{ needs.prepare.outputs.pnpm_version }}
-          cache: true
+      - uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: ${{ needs.prepare.outputs.node_version }}
+
+      - name: Add Mise repo
+        run: |
+          mkdir -p /etc/apt/keyrings
+          curl $CURL_OPTS https://mise.jdx.dev/gpg-key.pub \
+            | gpg --dearmor -o /etc/apt/keyrings/mise.gpg
+          F=/etc/apt/sources.list.d/mise.sources
+          printf "Types: deb\nURIs: https://mise.jdx.dev/deb/\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/mise.gpg\n" \
+            "${{ matrix.debian_version }}" "$(dpkg --print-architecture)" > "$F"
 
       - name: Install dependencies
         run: |
@@ -177,25 +187,36 @@ jobs:
             libcgif-dev \
             libimagequant-dev \
             libraw-dev \
-            jq
+            jq \
+            mise
 
-      - name: Create dirs
+      - name: Build immich
         run: |
+          set -euxo pipefail
+
+          install_dir=${{ needs.prepare.outputs.install_dir }}
+          vips_dir=${{ needs.prepare.outputs.vips_dir }}
+          source_dir=${{ needs.prepare.outputs.source_dir }}
+          app_dir=${{ needs.prepare.outputs.app_dir }}
+          plugin_dir=${{ needs.prepare.outputs.plugin_dir }}
+
+          # Create dir structure
+          echo "Creating dir structure..."
           mkdir -p \
-            ${{ needs.prepare.outputs.install_dir }} \
-            ${{ needs.prepare.outputs.source_dir }} \
-            ${{ needs.prepare.outputs.vips_dir }} \
-            ${{ needs.prepare.outputs.plugin_dir }}
+            $install_dir \
+            $source_dir \
+            $vips_dir \
+            $plugin_dir
 
-      - name: Build libheif
-        run: |
+          # Build libheif
+          echo "Building libheif..."
           cd /tmp
           curl $CURL_OPTS -o h.tgz https://github.com/strukturag/libheif/releases/download/v${{ needs.prepare.outputs.libheif_version }}/libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz
           tar xzf h.tgz
           cd libheif-*
           mkdir build && cd build
           cmake .. \
-            -DCMAKE_INSTALL_PREFIX=${{ needs.prepare.outputs.vips_dir }} \
+            -DCMAKE_INSTALL_PREFIX=$vips_dir \
             -DWITH_DAV1D=ON \
             -DWITH_LIBDE265=ON \
             -DWITH_AOM_ENCODER=ON \
@@ -203,35 +224,43 @@ jobs:
           make -j"$(nproc)"
           make install
 
-      - name: Build libvips
-        run: |
+          # Build vips
+          echo "Building libvips with HEIC support..."
+          export PKG_CONFIG_PATH="$vips_dir/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+          export LD_LIBRARY_PATH="$vips_dir/lib:${LD_LIBRARY_PATH:-}"
           cd /tmp
           curl $CURL_OPTS -o v.xz https://github.com/libvips/libvips/releases/download/v${{ needs.prepare.outputs.vips_version }}/vips-${{ needs.prepare.outputs.vips_version }}.tar.xz
           tar xf v.xz
           cd vips-*
           meson setup build \
-            --prefix=${{ needs.prepare.outputs.vips_dir }} \
+            --prefix=$vips_dir \
             --libdir=lib \
             -Dintrospection=disabled \
             -Dtiff=disabled
           ninja -C build install
 
-      - name: Build immich
-        run: |
-          set -euxo pipefail
+          # Install pnpm
+          echo "Installing pnpm..."
+          npm install --global corepack@latest
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+          export CI=1
+          corepack enable pnpm
+          corepack use pnpm@latest-${{ needs.prepare.outputs.pnpm_version }}
 
-          install_dir=${{ needs.prepare.outputs.install_dir }}
-          source_dir=${{ needs.prepare.outputs.source_dir }}
-          app_dir=${{ needs.prepare.outputs.app_dir }}
-          plugin_dir=${{ needs.prepare.outputs.plugin_dir }}
+          # Print versions
+          echo "node version: $(node -v)"
+          echo "npm version: $(npm -v)"
+          echo "pnpm version: $(pnpm -v)"
 
           # Download immich archive and extract it in source_dir
+          echo "Downloading immich archive and extract it in source_dir..."
           cd "$source_dir"
           curl $CURL_OPTS -o src.tgz https://github.com/immich-app/immich/archive/refs/tags/v${{ needs.prepare.outputs.immich_version }}.tar.gz
           tar xzf src.tgz --strip-components=1
           rm src.tgz
 
           # Patch source
+          echo "Patching source..."
           cd "$source_dir"
 
             # Replace /usr/src
@@ -247,16 +276,20 @@ jobs:
             fi
 
           # Build server
+          echo "Building immich server..."
           cd "$source_dir/server"
+          export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+          export CI=1
           export SHARP_IGNORE_GLOBAL_LIBVIPS=true
           pnpm --filter immich --frozen-lockfile build
           unset SHARP_IGNORE_GLOBAL_LIBVIPS
           export SHARP_FORCE_GLOBAL_LIBVIPS=true
-          pnpm --filter immich --frozen-lockfile --prod --no-optional --force deploy "$app_dir"
+          pnpm --filter immich --frozen-lockfile --prod --no-optional deploy "$app_dir" --force
           cp "$app_dir/package.json" "$app_dir/bin/"
           sed -i "s@^start@./start@g" "$app_dir/bin/immich-admin"
 
           # Build openapi & web
+          echo "Building immich openapi & web interface..."
           cd "$source_dir"
           pnpm --filter @immich/sdk --filter immich-web --frozen-lockfile --force install
           unset SHARP_FORCE_GLOBAL_LIBVIPS
@@ -265,6 +298,7 @@ jobs:
           cp -a web/build "$app_dir/www/"
 
           # Build cli
+          echo "Building immich cli..."
           cd "$source_dir"
           pnpm --filter @immich/sdk --filter @immich/cli --frozen-lockfile install
           pnpm --filter @immich/sdk --filter @immich/cli build
@@ -272,20 +306,22 @@ jobs:
           ln -s "$app_dir/cli/bin/immich" "$app_dir/bin/immich"
 
           # Build plugins
-          cd "$source_dir"
-          mise trust --ignore ./mise.toml
-          mise trust ./plugins/mise.toml
+          echo "Building immich plugins..."
           cd "$source_dir/plugins"
+          mise trust --ignore ../mise.toml
+          mise trust ./mise.toml
           mise install
           mise run build
           cp -r dist "$plugin_dir/"
           cp manifest.json "$plugin_dir/"
 
           # Update remaining assets
+          echo "Updating remaining assets..."
           cp -a LICENSE "$app_dir/"
           rm "$app_dir/bin/start.sh"
 
           # Cleanup
+          echo "Cleaning up immich source directory..."
           rm -rf "$source_dir"
 
       - name: Create tarball
