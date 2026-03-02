@@ -14,6 +14,15 @@ jobs:
     container:
       image: debian:trixie-slim
     steps:
-    - run: |
-        curl https://mise.jdx.dev/mise-latest-linux-x64 > /bin/mise && chmod 755 /bin/mise
-        echo "mise version: $(mise version --json | jq -r .version)"
+
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            curl \
+            jq
+            
+      - name: Install mise
+        run: |
+          curl https://mise.jdx.dev/mise-latest-linux-x64 > /bin/mise && chmod 755 /bin/mise
+          echo "mise version: $(mise version --json | jq -r .version)"
