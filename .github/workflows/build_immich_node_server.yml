@@ -239,8 +239,8 @@ jobs:
 
           # Install mise
           echo "Installing mise..."
-          curl https://mise.run | sh
-          export PATH="$HOME/.local/share/mise/bin:$HOME/.local/share/mise/shims:$PATH"
+          curl https://mise.jdx.dev/mise-latest-linux-x64 > /bin/mise 
+          chmod 755 /bin/mise
 
           # Print versions
           echo "node version: $(node -v)"
