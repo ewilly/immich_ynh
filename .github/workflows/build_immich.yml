@@ -35,11 +35,8 @@ jobs:
       - name: Declare var
         id: declare-var
         run: |
-          # Base install dir
+          # Define directories used across jobs and expose them via $GITHUB_OUTPUT.
           INSTALL_DIR="/var/www/immich"
-          echo "install_dir=$INSTALL_DIR" >> $GITHUB_OUTPUT
-
-          # Sources / toolchain / app output
           SOURCE_DIR="$INSTALL_DIR/source"
           VIPS_DIR="$INSTALL_DIR/vips"
           APP_DIR="$INSTALL_DIR/immich/app"
@@ -49,7 +46,7 @@ jobs:
           GEODATA_SOURCE_DIR="$SOURCE_DIR/geodata"
           GEODATA_DIR="$APP_DIR/geodata"
 
-          # Expose outputs
+          echo "install_dir=$INSTALL_DIR" >> $GITHUB_OUTPUT
           echo "source_dir=$SOURCE_DIR" >> $GITHUB_OUTPUT
           echo "vips_dir=$VIPS_DIR" >> $GITHUB_OUTPUT
           echo "app_dir=$APP_DIR" >> $GITHUB_OUTPUT
@@ -93,7 +90,7 @@ jobs:
         id: check-version
         run: |
           set -euo pipefail
-          # Use a single version tag across matrix, attach per-OS tarballs to same release
+          # Use a single version tag across matrix; attach per-OS artifacts to the same release.
           IMMICH_VERSION="${{ steps.get-versions.outputs.immich_version }}"
           TAG_NAME="immich-v${IMMICH_VERSION}"
 
@@ -108,13 +105,13 @@ jobs:
         if: steps.check-version.outputs.should_build == 'true'
         run: |
           set -euo pipefail
-          # Read input when manual, fallback to default when scheduled
+          # Read input when manual, fallback to default when scheduled.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSIONS="${{ github.event.inputs.debian_versions }}"
           else
             VERSIONS="bookworm,trixie"
           fi
-          # Convert CSV -> JSON array for matrix
+          # Convert CSV -> JSON array for matrix.
           MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
@@ -128,7 +125,7 @@ jobs:
     container:
       image: debian:${{ matrix.debian_version }}-slim
     env:
-      # Global build env + curl robustness
+      # Build env + curl robustness
       PKG_CONFIG_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
       LD_LIBRARY_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib:${LD_LIBRARY_PATH:-}"
       PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:${PATH:-}"
@@ -141,7 +138,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      # 2) Node (pnpm cache enabled by setup-node) + configure pnpm store dir & cache
+      # 2) Node + pnpm store cache
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -162,7 +159,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
-      # 3) Minimal base tools to add external APT repositories (avoid heavy deps here)
+      # 3) Minimal tools to add external APT repositories
       - name: Install base tools for APT repos
         run: |
           set -euxo pipefail
@@ -170,7 +167,7 @@ jobs:
           apt-get install -y --no-install-recommends curl gpg ca-certificates
           rm -rf /var/lib/apt/lists/*
 
-      # 4) Add Jellyfin repository (FFmpeg build with codecs)
+      # 4) Add Jellyfin repo (FFmpeg build with codecs)
       - name: Add Jellyfin repo
         run: |
           set -euxo pipefail
@@ -186,7 +183,7 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/jellyfin.gpg
 EOF
 
-      # 5) Add Mise repository (tool runtime manager)
+      # 5) Add Mise repo (runtime manager)
       - name: Add Mise repo
         run: |
           set -euxo pipefail
@@ -202,10 +199,7 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/mise-archive-keyring.gpg
 EOF
 
-      # 6) Cache & install APT packages (heavy list) in ONE shot
-      #    This leverages a dedicated marketplace action that wraps actions/cache around APT. 
-      #    Re-runs restore packages instead of downloading them every time.
-      #    (Repos are already added above so packages from Jellyfin/Mise are available.)
+      # 6) Cache & install APT packages (heavy list) in one shot
       - name: Cache and Install APT packages
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -225,17 +219,15 @@ EOF
             libtiff-dev libgif-dev libcgif-dev libimagequant-dev libraw-dev jq
             jellyfin-ffmpeg mise
           version: 1
-          # note: if you change package list meaningfully, bump "version" to invalidate cache
-      # (Marketplace / docs: https://github.com/marketplace/actions/cache-apt-packages) 
 
-      # 7) Clean up APT lists to reduce layer size (the action keeps packages available)
+      # 7) Reduce layer size; cached pkgs remain available
       - name: Cleanup APT caches
         run: |
           set -euxo pipefail
           apt-get clean
           rm -rf /var/lib/apt/lists/*
 
-      # 8) Cache ccache dir across runs and enable it for all native builds
+      # 8) Cache ccache and enable it
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -269,7 +261,7 @@ EOF
             ${{ needs.prepare.outputs.geodata_source_dir }} \
             ${{ needs.prepare.outputs.geodata_dir }}
 
-      # 10) Build libheif (with dav1d, libde265, AOM encoder, no examples)
+      # 10) Build libheif
       - name: Download and build libheif
         run: |
           set -euxo pipefail
@@ -293,7 +285,7 @@ EOF
             ..
           make -j"$(nproc)" && make install
 
-      # 11) Build libvips (no introspection, TIFF disabled; install into $vips_dir/lib)
+      # 11) Build libvips
       - name: Download and build libvips
         run: |
           set -euxo pipefail
@@ -310,10 +302,11 @@ EOF
             -Dtiff=disabled
           cd build && ninja install
 
-      # 12) Build immich (server, web, CLI, plugins) and assemble app layout
+      # 12) Build immich (server, web, CLI, plugins)
       - name: Download and build immich
         run: |
           set -euxo pipefail
+
           install_dir=${{ needs.prepare.outputs.install_dir }}
           source_dir=${{ needs.prepare.outputs.source_dir }}
           app_dir=${{ needs.prepare.outputs.app_dir }}
@@ -339,7 +332,7 @@ EOF
             sed -i "s@github:extism/js-pdk@github:ewilly/js-pdk@g" "$source_dir/plugins/mise.toml"
           fi
 
-          # ---- Server (uses local libvips via SHARP_FORCE/IGNORE flags) ----
+          # ---- Server (uses local libvips via SHARP_FORCE/IGNORE flags)
           cd "$source_dir/server"
           export SHARP_IGNORE_GLOBAL_LIBVIPS=true
           pnpm --filter immich --frozen-lockfile build
@@ -349,7 +342,7 @@ EOF
           cp "$app_dir/package.json" "$app_dir/bin/"
           sed -i "s@^start@./start@g" "$app_dir/bin/immich-admin"
 
-          # ---- OpenAPI & Web ----
+          # ---- OpenAPI & Web
           cd "$source_dir"
           pnpm --filter @immich/sdk --filter immich-web --frozen-lockfile --force install
           unset SHARP_FORCE_GLOBAL_LIBVIPS
@@ -357,14 +350,14 @@ EOF
           pnpm --filter @immich/sdk --filter immich-web build
           cp -a web/build "$app_dir/www/"
 
-          # ---- CLI ----
+          # ---- CLI
           cd "$source_dir"
           pnpm --filter @immich/sdk --filter @immich/cli --frozen-lockfile install
           pnpm --filter @immich/sdk --filter @immich/cli build
           pnpm --filter @immich/cli --prod --no-optional deploy "$app_dir/cli"
           ln -s "$app_dir/cli/bin/immich" "$app_dir/bin/immich"
 
-          # ---- Plugins ----
+          # ---- Plugins
           cd "$source_dir"
           mise trust --ignore ./mise.toml
           mise trust ./plugins/mise.toml
@@ -374,11 +367,11 @@ EOF
           cp -r dist "$plugin_dir/"
           cp manifest.json "$plugin_dir/"
 
-          # ---- Misc / cleanup ----
+          # ---- Misc / cleanup
           cp -a LICENSE "$app_dir/"
           rm "$app_dir/bin/start.sh"
 
-          # ---- Machine Learning (uv-managed venv) ----
+          # ---- Machine Learning (uv-managed venv)
           cd "$source_dir/machine-learning"
           if [ -f "$source_dir/machine-learning/.python-version" ]; then
             python_version=$(cat "$source_dir/machine-learning/.python-version")
@@ -398,7 +391,7 @@ EOF
           cp -a "$source_dir/machine-learning/ann" "$ml_dir/"
           cp -a "$source_dir/machine-learning/immich_ml" "$ml_dir/"
 
-          # ---- Geodata ----
+          # ---- Geodata
           cd "$geodata_source_dir"
           curl $CURL_OPTS -LO "https://download.geonames.org/export/dump/cities500.zip"
           curl $CURL_OPTS -LO "https://download.geonames.org/export/dump/admin1CodesASCII.txt"
@@ -408,7 +401,7 @@ EOF
           cp -a cities500.txt admin1CodesASCII.txt admin2Codes.txt ne_10m_admin_0_countries.geojson "$geodata_dir/"
           date --iso-8601=seconds | tr -d "\n" > "$geodata_dir/geodata-date.txt"
 
-          # ---- Cleanup sources to shrink artifact ----
+          # Cleanup sources to shrink artifact
           rm -rf "$source_dir"
 
       # 13) Package app into a tarball per OS in matrix
@@ -440,7 +433,6 @@ EOF
         with:
           path: artifacts
 
-      # Single release/tag for a given immich version; both OS tarballs are attached as assets
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -451,6 +443,6 @@ EOF
             immich : `${{ needs.prepare.outputs.immich_version }}`
             libheif : `${{ needs.prepare.outputs.libheif_version }}`
             libvips : `${{ needs.prepare.outputs.vips_version }}`
-          files: artifacts/**/*    # uploads both bookworm & trixie tarballs
+          files: artifacts/**/*
           draft: false
           prerelease: false
