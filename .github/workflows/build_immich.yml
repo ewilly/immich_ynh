@@ -231,19 +231,19 @@ jobs:
             libraw-dev \
             jq
             
-        - name: Install Jellyfin repo + jellyfin-ffmpeg
-          run: |
-            set -euxo pipefail
+      - name: Install Jellyfin repo + jellyfin-ffmpeg
+        run: |
+          set -euxo pipefail
 
-            # Create keyring
-            mkdir -p /etc/apt/keyrings
+          # Create keyring
+          mkdir -p /etc/apt/keyrings
 
-            # Import GPG key
-            curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
-              | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
+          # Import GPG key
+          curl -fsSL https://repo.jellyfin.org/jellyfin_team.gpg.key \
+            | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
 
-            # Add APT repository
-            tee /etc/apt/sources.list.d/jellyfin.sources <<EOF
+          # Add APT repository
+          tee /etc/apt/sources.list.d/jellyfin.sources <<EOF
 Types: deb
 URIs: https://repo.jellyfin.org/debian
 Suites: ${{ matrix.debian_version }}
@@ -252,21 +252,21 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/jellyfin.gpg
 EOF
 
-            # Update and install jellyfin-ffmpeg
-            apt-get update
-            apt-get install -y jellyfin-ffmpeg
+          # Update and install jellyfin-ffmpeg
+          apt-get update
+          apt-get install -y jellyfin-ffmpeg
 
-        - name: Install Mise repo + mise
-          run: |
-            set -euxo pipefail
+      - name: Install Mise repo + mise
+        run: |
+          set -euxo pipefail
 
-            # Import GPG key
-            install -d /etc/apt/keyrings
-            curl -fsSL https://mise.jdx.dev/gpg-key.pub \
-              | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg
+          # Import GPG key
+          install -d /etc/apt/keyrings
+          curl -fsSL https://mise.jdx.dev/gpg-key.pub \
+            | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg
 
-            # Add APT repository
-            tee /etc/apt/sources.list.d/mise.sources <<EOF
+          # Add APT repository
+          tee /etc/apt/sources.list.d/mise.sources <<EOF
 Types: deb
 URIs: https://mise.jdx.dev/deb/
 Suites: ${{ matrix.debian_version }}
