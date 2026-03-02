@@ -1,4 +1,4 @@
-name: Build immich node server with libvips and libheif
+name: Build immich node server with libvips and libheif (optimized)
 
 on:
   workflow_dispatch:
@@ -14,6 +14,7 @@ jobs:
     outputs:
       immich_version: ${{ steps.get-versions.outputs.immich_version }}
       node_version: ${{ steps.get-versions.outputs.node_version }}
+      pnpm_version: ${{ steps.get-versions.outputs.pnpm_version }}
       libheif_version: ${{ steps.get-versions.outputs.libheif_version }}
       vips_version: ${{ steps.get-versions.outputs.vips_version }}
       should_build: ${{ steps.check-version.outputs.should_build }}
@@ -56,6 +57,12 @@ jobs:
             | sed -nE 's@.*FROM[[:space:]]+node:([0-9]+\.[0-9]+\.[0-9]+).*@\1@p' \
             | head -n1)
           echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
+
+          PNPM_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/immich/refs/tags/v$IMMICH_VERSION/package.json\
+            | jq -r '.packageManager \
+            | split("@")[1] \
+            | split(".")[0]')
+          echo "pnpm_version=$PNPM_VERSION" >> $GITHUB_OUTPUT
 
           LIBHEIF_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libheif.json \
             | jq -r '.version')
@@ -111,24 +118,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: ${{ needs.prepare.outputs.pnpm_version }}
+          cache: true
+
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: ${{ needs.prepare.outputs.node_version }}
           cache: 'pnpm'
-
-      - name: Enable pnpm via Corepack
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-          pnpm --version
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ~/.pnpm-store
-          key: pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: pnpm-
 
       - name: Cache and Install APT packages
         uses: awalsh128/cache-apt-pkgs-action@v1
@@ -294,4 +294,3 @@ jobs:
             libheif: ${{ needs.prepare.outputs.libheif_version }}
             libvips: ${{ needs.prepare.outputs.vips_version }}
           files: artifacts/**/*
-
