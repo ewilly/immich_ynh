@@ -1,0 +1,21 @@
+name: Test mise
+
+on:
+  workflow_dispatch:
+    inputs:
+      debian_versions:
+        description: 'Debian versions to build (comma-separated: bookworm, trixie, or bookworm,trixie)'
+        required: true
+        default: 'trixie'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:trixie-slim
+    steps:
+    - run: |
+        curl https://mise.run | sh
+        echo "$HOME/.local/share/mise/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
+        echo "mise version: $(mise version --json | jq -r .version)"
