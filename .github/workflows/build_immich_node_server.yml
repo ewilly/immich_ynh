@@ -58,7 +58,7 @@ jobs:
             | head -n1)
           echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
 
-          PNPM_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/immich/refs/tags/v2.5.6/package.json \
+          PNPM_VERSION=$(curl -s "https://raw.githubusercontent.com/immich-app/immich/refs/tags/v$IMMICH_VERSION/package.json" \
             | jq -r '.packageManager | split("@")[1] | split(".")[0]')
           PNPM_VERSION=10
           echo "pnpm_version=$PNPM_VERSION" >> $GITHUB_OUTPUT
