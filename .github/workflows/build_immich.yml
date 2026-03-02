@@ -123,14 +123,19 @@ jobs:
     container:
       image: debian:${{ matrix.debian_version }}-slim
     env:
-      PKG_CONFIG_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-      LD_LIBRARY_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib:${LD_LIBRARY_PATH:-}"
-      PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:${PATH:-}"
+      PKG_CONFIG_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib/pkgconfig:$PKG_CONFIG_PATH"
+      LD_LIBRARY_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib:$LD_LIBRARY_PATH"
+      PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:$PATH"
       NODE_OPTIONS: "--max_old_space_size=6144"
       NODE_ENV: production
       CURL_OPTS: "--fail --location --retry 3 --retry-delay 2"
 
     steps:
+      - name: Test
+        run: |
+          echo $PATH
+          echo $(which ls)
+          
       - name: Install base tools for APT repos
         run: |
           set -euxo pipefail
