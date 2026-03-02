@@ -1,4 +1,4 @@
-name: Build immich with libvips and libheif (optimized)
+name: Build immich with libvips and libheif
 
 on:
   workflow_dispatch:
