@@ -168,7 +168,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ needs.prepare.outputs.node_version }}
-          cache: pnpm
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: |
