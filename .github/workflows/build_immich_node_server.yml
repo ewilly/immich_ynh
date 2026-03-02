@@ -47,10 +47,7 @@ jobs:
           set -euo pipefail
 
           IMMICH_VERSION=$(curl -sIL https://github.com/immich-app/immich/releases/latest \
-            | awk -F': ' '/^location:/I {print $2}' \
-            | sed -n 's@.*/tag/\(v[^/]*\).*@\1@p' \
-            | head -n1 \
-            | sed 's@^v@@')
+            | grep -i location | sed -n 's@.*/tag/v\([^"]*\).*@\1@p'| tr -d '\r[:space:]')
           echo "immich_version=$IMMICH_VERSION" >> $GITHUB_OUTPUT
 
           NODE_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/refs/heads/main/server/Dockerfile \
@@ -58,12 +55,10 @@ jobs:
             | head -n1)
           echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
 
-          echo "https://raw.githubusercontent.com/immich-app/immich/refs/tags/v$IMMICH_VERSION/package.json"
-          PNPM_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/immich/refs/tags/v"$IMMICH_VERSION"/package.json \
-            | jq -r '.packageManager | split("@")[1] | split(".")[0]')
-          PNPM_VERSION=10
+          PNPM_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/immich/refs/tags/v$IMMICH_VERSION/package.json \
+            | jq -r '.packageManager | split("@")[1] | split(".")[0]' )
           echo "pnpm_version=$PNPM_VERSION" >> $GITHUB_OUTPUT
-
+          
           LIBHEIF_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libheif.json \
             | jq -r '.version')
           echo "libheif_version=$LIBHEIF_VERSION" >> $GITHUB_OUTPUT
@@ -84,7 +79,7 @@ jobs:
           if git rev-parse -q --verify "refs/tags/$TAG"; then
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
-            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Set matrix
