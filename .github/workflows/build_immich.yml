@@ -125,7 +125,7 @@ jobs:
     env:
       PKG_CONFIG_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib/pkgconfig:$PKG_CONFIG_PATH"
       LD_LIBRARY_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib:$LD_LIBRARY_PATH"
-      PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:$PATH"
+      PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:/sbin:/bin:/usr/sbin:/usr/bin"
       NODE_OPTIONS: "--max_old_space_size=6144"
       NODE_ENV: production
       CURL_OPTS: "--fail --location --retry 3 --retry-delay 2"
