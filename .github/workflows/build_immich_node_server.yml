@@ -191,8 +191,7 @@ jobs:
             libcgif-dev \
             libimagequant-dev \
             libraw-dev \
-            jq \
-            mise
+            jq
 
       - name: Build immich
         run: |
