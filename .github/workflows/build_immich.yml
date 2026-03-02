@@ -56,17 +56,23 @@ jobs:
         id: get-versions
         run: |
           set -euo pipefail
+          
           IMMICH_VERSION=$(curl -sIL https://github.com/immich-app/immich/releases/latest \
-            | grep -i location | sed -n 's@.*/tag/v\([^"]*\).*@\1@p')
+            | awk -F': ' '/^location:/I {print $2}' \
+            | sed -n 's@.*/tag/\(v[^/]*\).*@\1@p' \
+            | head -n1 \
+            | sed 's@^v@@')
           echo "immich_version=$IMMICH_VERSION" >> $GITHUB_OUTPUT
 
-          NODE_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/Dockerfile \
-            | sed -nE 's@.*node:([0-9]+\.[0-9]+\.[0-9]+).*@\1@p')
+          NODE_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/refs/heads/main/server/Dockerfile \
+            | sed -nE 's@.*FROM[[:space:]]+node:([0-9]+\.[0-9]+\.[0-9]+).*@\1@p' \
+            | head -n1)
           echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
 
           LIBHEIF_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libheif.json | jq -r '.version')
-          VIPS_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libvips.json | jq -r '.version')
           echo "libheif_version=$LIBHEIF_VERSION" >> $GITHUB_OUTPUT
+
+          VIPS_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libvips.json | jq -r '.version')
           echo "vips_version=$VIPS_VERSION" >> $GITHUB_OUTPUT
 
       - name: Checkout repo
@@ -89,11 +95,13 @@ jobs:
         if: steps.check-version.outputs.should_build == 'true'
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            V="${{ github.event.inputs.debian_versions }}"
+            VERSIONS="${{ github.event.inputs.debian_versions }}"
           else
-            V="bookworm,trixie"
+            VERSIONS="bookworm,trixie"
           fi
-          echo "matrix=$(echo "$V" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
+
+          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   build:
     runs-on: ubuntu-latest
