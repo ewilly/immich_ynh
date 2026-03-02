@@ -123,7 +123,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: ${{ needs.prepare.outputs.node_version }}
-          cache: 'pnpm'
 
       - name: Cache and Install APT packages
         uses: awalsh128/cache-apt-pkgs-action@v1
