@@ -125,19 +125,6 @@ jobs:
         with:
           node-version: ${{ needs.prepare.outputs.node_version }}
 
-      - name: Add Mise repo
-        # run: |
-          # mkdir -p /etc/apt/keyrings
-          # curl $CURL_OPTS https://mise.jdx.dev/gpg-key.pub \
-          #   | gpg --dearmor -o /etc/apt/keyrings/mise.gpg
-          # F=/etc/apt/sources.list.d/mise.sources
-          # printf "Types: deb\nURIs: https://mise.jdx.dev/deb/\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/mise.gpg\n" \
-          #   "${{ matrix.debian_version }}" "$(dpkg --print-architecture)" > "$F"
-        run: |
-          curl https://mise.run | sh
-          echo "$HOME/.local/share/mise/bin" >> $GITHUB_PATH
-          echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
-
       - name: Install dependencies
         run: |
           apt-get update
@@ -250,10 +237,16 @@ jobs:
           corepack enable pnpm
           corepack use pnpm@latest-${{ needs.prepare.outputs.pnpm_version }}
 
+          # Install mise
+          echo "Installing mise..."
+          curl https://mise.run | sh
+          export PATH="$HOME/.local/share/mise/bin:$HOME/.local/share/mise/shims:$PATH"
+
           # Print versions
           echo "node version: $(node -v)"
           echo "npm version: $(npm -v)"
           echo "pnpm version: $(pnpm -v)"
+          echo "mise version: $(mise version --json | jq -r .version)"
 
           # Download immich archive and extract it in source_dir
           echo "Downloading immich archive and extract it in source_dir..."
