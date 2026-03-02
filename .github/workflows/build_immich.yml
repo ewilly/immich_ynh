@@ -1,4 +1,4 @@
-name: Build immich with libvips and libheif
+name: Build immich with libvips and libheif (optimized)
 
 on:
   workflow_dispatch:
@@ -7,9 +7,6 @@ on:
         description: 'Debian versions to build (comma-separated: bookworm, trixie, or bookworm,trixie)'
         required: true
         default: 'bookworm,trixie'
-  #schedule:
-    # Run daily at 2:00 AM UTC to check for version updates
-    # - cron: '0 2 * * *'
 
 jobs:
   prepare:
@@ -35,7 +32,6 @@ jobs:
       - name: Declare var
         id: declare-var
         run: |
-          # Define directories and expose via $GITHUB_OUTPUT.
           INSTALL_DIR="/var/www/immich"
           SOURCE_DIR="$INSTALL_DIR/source"
           VIPS_DIR="$INSTALL_DIR/vips"
@@ -60,28 +56,20 @@ jobs:
         id: get-versions
         run: |
           set -euo pipefail
-
-          # Latest immich release (strip leading "v")
           IMMICH_VERSION=$(curl -sIL https://github.com/immich-app/immich/releases/latest \
-            | awk -F': ' '/^location:/I {print $2}' \
-            | sed -n 's@.*/tag/\(v[^/]*\).*@\1@p' \
-            | head -n1 \
-            | sed 's@^v@@')
+            | grep -i location | sed -n 's@.*/tag/v\([^"]*\).*@\1@p')
           echo "immich_version=$IMMICH_VERSION" >> $GITHUB_OUTPUT
 
-          # Node version used by base-images/server
-          NODE_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/refs/heads/main/server/Dockerfile \
-            | sed -nE 's@.*FROM[[:space:]]+node:([0-9]+\.[0-9]+\.[0-9]+).*@\1@p' \
-            | head -n1)
+          NODE_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/Dockerfile \
+            | sed -nE 's@.*node:([0-9]+\.[0-9]+\.[0-9]+).*@\1@p')
           echo "node_version=$NODE_VERSION" >> $GITHUB_OUTPUT
 
-          # libheif & libvips pinned versions from immich base sources
           LIBHEIF_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libheif.json | jq -r '.version')
           VIPS_VERSION=$(curl -s https://raw.githubusercontent.com/immich-app/base-images/main/server/sources/libvips.json | jq -r '.version')
           echo "libheif_version=$LIBHEIF_VERSION" >> $GITHUB_OUTPUT
           echo "vips_version=$VIPS_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Checkout for tags check
+      - name: Checkout repo
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -89,12 +77,8 @@ jobs:
       - name: Check if build is needed
         id: check-version
         run: |
-          set -euo pipefail
-          # Single tag for the immich version; matrix artifacts will attach to same release.
-          IMMICH_VERSION="${{ steps.get-versions.outputs.immich_version }}"
-          TAG_NAME="immich-v${IMMICH_VERSION}"
-
-          if git show-ref --tags --verify --quiet "refs/tags/${TAG_NAME}"; then
+          TAG="immich-v${{ steps.get-versions.outputs.immich_version }}"
+          if git rev-parse -q --verify "refs/tags/$TAG"; then
             echo "should_build=false" >> $GITHUB_OUTPUT
           else
             echo "should_build=true" >> $GITHUB_OUTPUT
@@ -104,14 +88,12 @@ jobs:
         id: set-matrix
         if: steps.check-version.outputs.should_build == 'true'
         run: |
-          set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSIONS="${{ github.event.inputs.debian_versions }}"
+            V="${{ github.event.inputs.debian_versions }}"
           else
-            VERSIONS="bookworm,trixie"
+            V="bookworm,trixie"
           fi
-          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          echo "matrix=$(echo "$V" | jq -R -s -c 'split(",")')" >> $GITHUB_OUTPUT
 
   build:
     runs-on: ubuntu-latest
@@ -122,77 +104,21 @@ jobs:
         debian_version: ${{ fromJson(needs.prepare.outputs.matrix) }}
     container:
       image: debian:${{ matrix.debian_version }}-slim
+
     env:
-      PKG_CONFIG_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib/pkgconfig:$PKG_CONFIG_PATH"
-      LD_LIBRARY_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib:$LD_LIBRARY_PATH"
-      PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      HOME: "/root"
+      PATH: "/usr/lib/jellyfin-ffmpeg:/root/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       NODE_OPTIONS: "--max_old_space_size=6144"
       NODE_ENV: production
       CURL_OPTS: "--fail --location --retry 3 --retry-delay 2"
 
     steps:
-      - name: Test
+      - name: Fix base PATH + base tools
         run: |
-          echo $PATH
-          echo $(which ls)
-          
-      - name: Install base tools for APT repos
-        run: |
-          set -euxo pipefail
           apt-get update
-          apt-get install -y --no-install-recommends curl gpg ca-certificates
-          rm -rf /var/lib/apt/lists/*
+          apt-get install -y curl ca-certificates gpg
 
-      - name: Add Jellyfin repo
-        run: |
-          set -euxo pipefail
-          mkdir -p /etc/apt/keyrings
-          curl $CURL_OPTS https://repo.jellyfin.org/jellyfin_team.gpg.key \
-            | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
-          repo_file="/etc/apt/sources.list.d/jellyfin.sources"
-          printf "Types: deb\n" > "$repo_file"
-          printf "URIs: https://repo.jellyfin.org/debian\n" >> "$repo_file"
-          printf "Suites: %s\n" "${{ matrix.debian_version }}" >> "$repo_file"
-          printf "Components: main\n" >> "$repo_file"
-          printf "Architectures: %s\n" "$(dpkg --print-architecture)" >> "$repo_file"
-          printf "Signed-By: /etc/apt/keyrings/jellyfin.gpg\n" >> "$repo_file"
-
-      - name: Add Mise repo
-        run: |
-          set -euxo pipefail
-          install -d /etc/apt/keyrings
-          curl $CURL_OPTS https://mise.jdx.dev/gpg-key.pub \
-            | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg
-          repo_file="/etc/apt/sources.list.d/mise.sources"
-          printf "Types: deb\n" > "$repo_file"
-          printf "URIs: https://mise.jdx.dev/deb/\n" >> "$repo_file"
-          printf "Suites: %s\n" "${{ matrix.debian_version }}" >> "$repo_file"
-          printf "Components: main\n" >> "$repo_file"
-          printf "Architectures: %s\n" "$(dpkg --print-architecture)" >> "$repo_file"
-          printf "Signed-By: /etc/apt/keyrings/mise-archive-keyring.gpg\n" >> "$repo_file"
-
-      - name: Cache and Install APT packages
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: >
-            build-essential cmake meson ninja-build pkg-config
-            python3 python3-dev python3-venv libssl-dev libffi-dev uuid-runtime
-            autoconf tar unzip perl
-            libnet-ssleay-perl libio-socket-ssl-perl libcapture-tiny-perl
-            libfile-which-perl libfile-chdir-perl libpkgconfig-perl
-            libffi-checklib-perl libtest-warnings-perl libtest-fatal-perl
-            libtest-needs-perl libtest2-suite-perl libsort-versions-perl
-            libpath-tiny-perl libtry-tiny-perl libterm-table-perl
-            libany-uri-escape-perl libmojolicious-perl libfile-slurper-perl
-            liblcms2-2 wget gpg ca-certificates tar xz-utils ccache
-            libgl1 libdav1d-dev libwebp-dev libaom-dev libde265-dev
-            libexif-dev libexpat1-dev libglib2.0-dev libjpeg-dev libpng-dev
-            libtiff-dev libgif-dev libcgif-dev libimagequant-dev libraw-dev jq
-            jellyfin-ffmpeg mise
-          version: 1
-
-      - name: Checkout code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -200,47 +126,59 @@ jobs:
           node-version: ${{ needs.prepare.outputs.node_version }}
           cache: 'pnpm'
 
-      - name: Enable pnpm and set store dir
+      - name: Enable pnpm via Corepack
         run: |
-          set -euo pipefail
-          corepack enable pnpm
-          pnpm config set store-dir ~/.pnpm-store
+          corepack enable
+          corepack prepare pnpm@latest --activate
+          pnpm --version
 
       - name: Cache pnpm store
         uses: actions/cache@v4
         with:
           path: ~/.pnpm-store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
+          key: pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-
 
-      - name: Cleanup APT caches
+      - name: Add Jellyfin repo
         run: |
-          set -euxo pipefail
-          apt-get clean
-          rm -rf /var/lib/apt/lists/*
+          mkdir -p /etc/apt/keyrings
+          curl $CURL_OPTS https://repo.jellyfin.org/jellyfin_team.gpg.key \
+            | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
+          F=/etc/apt/sources.list.d/jellyfin.sources
+          printf "Types: deb\nURIs: https://repo.jellyfin.org/debian\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/jellyfin.gpg\n" \
+            "${{ matrix.debian_version }}" "$(dpkg --print-architecture)" > "$F"
 
-      - name: Cache ccache
-        uses: actions/cache@v4
+      - name: Add Mise repo
+        run: |
+          mkdir -p /etc/apt/keyrings
+          curl $CURL_OPTS https://mise.jdx.dev/gpg-key.pub \
+            | gpg --dearmor -o /etc/apt/keyrings/mise.gpg
+          F=/etc/apt/sources.list.d/mise.sources
+          printf "Types: deb\nURIs: https://mise.jdx.dev/deb/\nSuites: %s\nComponents: main\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/mise.gpg\n" \
+            "${{ matrix.debian_version }}" "$(dpkg --print-architecture)" > "$F"
+
+      - name: Cache and Install APT packages
+        uses: awalsh128/cache-apt-pkgs-action@v1
         with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-${{ matrix.debian_version }}-${{ hashFiles('.github/workflows/**.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-${{ matrix.debian_version }}-
+          packages: >
+            build-essential cmake meson ninja-build pkg-config
+            python3 python3-dev python3-venv libssl-dev libffi-dev uuid-runtime
+            autoconf unzip perl
+            liblcms2-2 wget tar xz-utils ccache
+            libgl1 libdav1d-dev libwebp-dev libaom-dev libde265-dev
+            libexif-dev libexpat1-dev libglib2.0-dev libjpeg-dev libpng-dev
+            libtiff-dev libgif-dev libimagequant-dev libraw-dev jq
+            jellyfin-ffmpeg mise
+          version: 1
 
       - name: Enable ccache
         run: |
-          set -euxo pipefail
-          echo "CC=ccache gcc" >> $GITHUB_ENV
-          echo "CXX=ccache g++" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=2G" >> $GITHUB_ENV
+          export CC=ccache
+          export CXX=ccache
           ccache -M 2G
-          ccache -s
 
-      - name: Create directories
+      - name: Create dirs
         run: |
-          set -euxo pipefail
           mkdir -p \
             ${{ needs.prepare.outputs.install_dir }} \
             ${{ needs.prepare.outputs.source_dir }} \
@@ -252,158 +190,75 @@ jobs:
             ${{ needs.prepare.outputs.geodata_source_dir }} \
             ${{ needs.prepare.outputs.geodata_dir }}
 
-      - name: Download and build libheif
+      - name: Build libheif
         run: |
-          set -euxo pipefail
-          vips_dir="${{ needs.prepare.outputs.vips_dir }}"
           cd /tmp
-          curl $CURL_OPTS -o libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz \
-            https://github.com/strukturag/libheif/releases/download/v${{ needs.prepare.outputs.libheif_version }}/libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz
-          tar xzf libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz
-          cd libheif-${{ needs.prepare.outputs.libheif_version }}
+          curl $CURL_OPTS -o h.tgz https://github.com/strukturag/libheif/releases/download/v${{ needs.prepare.outputs.libheif_version }}/libheif-${{ needs.prepare.outputs.libheif_version }}.tar.gz
+          tar xzf h.tgz
+          cd libheif-*
           mkdir build && cd build
-          cmake --preset=release-noplugins \
-            -DCMAKE_INSTALL_PREFIX="$vips_dir" \
+          cmake .. \
+            -DCMAKE_INSTALL_PREFIX=${{ needs.prepare.outputs.vips_dir }} \
             -DWITH_DAV1D=ON \
-            -DENABLE_PARALLEL_TILE_DECODING=ON \
-            -DWITH_LIBSHARPYUV=ON \
             -DWITH_LIBDE265=ON \
-            -DWITH_AOM_DECODER=OFF \
             -DWITH_AOM_ENCODER=ON \
-            -DWITH_X265=OFF \
-            -DWITH_EXAMPLES=OFF \
-            ..
-          make -j"$(nproc)" && make install
+            -DWITH_EXAMPLES=OFF
+          make -j"$(nproc)"
+          make install
 
-      - name: Download and build libvips
+      - name: Build libvips
         run: |
-          set -euxo pipefail
-          vips_dir="${{ needs.prepare.outputs.vips_dir }}"
           cd /tmp
-          curl $CURL_OPTS -o vips-${{ needs.prepare.outputs.vips_version }}.tar.xz \
-            https://github.com/libvips/libvips/releases/download/v${{ needs.prepare.outputs.vips_version }}/vips-${{ needs.prepare.outputs.vips_version }}.tar.xz
-          tar xf vips-${{ needs.prepare.outputs.vips_version }}.tar.xz
-          cd vips-${{ needs.prepare.outputs.vips_version }}
-          meson setup build --buildtype=release \
-            --prefix="$vips_dir" \
+          curl $CURL_OPTS -o v.xz https://github.com/libvips/libvips/releases/download/v${{ needs.prepare.outputs.vips_version }}/vips-${{ needs.prepare.outputs.vips_version }}.tar.xz
+          tar xf v.xz
+          cd vips-*
+          meson setup build \
+            --prefix=${{ needs.prepare.outputs.vips_dir }} \
             --libdir=lib \
             -Dintrospection=disabled \
             -Dtiff=disabled
-          cd build && ninja install
+          ninja -C build install
 
-      - name: Download and build immich
+      - name: Build immich
         run: |
           set -euxo pipefail
+          SRC=${{ needs.prepare.outputs.source_dir }}
+          APP=${{ needs.prepare.outputs.app_dir }}
+          curl $CURL_OPTS -o src.tgz https://github.com/immich-app/immich/archive/refs/tags/v${{ needs.prepare.outputs.immich_version }}.tar.gz
+          tar xzf src.tgz -C "$SRC" --strip-components=1
 
-          install_dir=${{ needs.prepare.outputs.install_dir }}
-          source_dir=${{ needs.prepare.outputs.source_dir }}
-          app_dir=${{ needs.prepare.outputs.app_dir }}
-          plugin_dir=${{ needs.prepare.outputs.plugin_dir }}
-          ml_dir=${{ needs.prepare.outputs.ml_dir }}
-          geodata_source_dir=${{ needs.prepare.outputs.geodata_source_dir }}
-          geodata_dir=${{ needs.prepare.outputs.geodata_dir }}
-
-          # Source code
-          cd "$source_dir"
-          curl $CURL_OPTS -o immich.tar.gz \
-            https://github.com/immich-app/immich/archive/refs/tags/v${{ needs.prepare.outputs.immich_version }}.tar.gz
-          tar xzf immich.tar.gz --strip-components=1
-          rm immich.tar.gz
-
-          # Patch paths to match our on-host layout
-          grep -Rl "/usr/src" | xargs -n1 sed -i -e "s@/usr/src@$install_dir/immich@g"
-          grep -RlE "\"/build\"|'/build'" \
-            | xargs -n1 sed -i -e "s@\"/build\"@\"$app_dir\"@g" -e "s@'/build'@'$app_dir'@g"
-
-          # Temporary fix extism/js-pdk reference on bookworm
-          if [ "${{ matrix.debian_version }}" = "bookworm" ]; then
-            sed -i "s@github:extism/js-pdk@github:ewilly/js-pdk@g" "$source_dir/plugins/mise.toml"
-          fi
-
-          # ---- Server (uses local libvips via SHARP_FORCE/IGNORE flags)
-          cd "$source_dir/server"
+          cd "$SRC/server"
           export SHARP_IGNORE_GLOBAL_LIBVIPS=true
-          pnpm --filter immich --frozen-lockfile build
+          pnpm --filter immich build
           unset SHARP_IGNORE_GLOBAL_LIBVIPS
           export SHARP_FORCE_GLOBAL_LIBVIPS=true
-          pnpm --filter immich --frozen-lockfile --prod --no-optional deploy "$app_dir/"
-          cp "$app_dir/package.json" "$app_dir/bin/"
-          sed -i "s@^start@./start@g" "$app_dir/bin/immich-admin"
+          pnpm --filter immich --prod --no-optional deploy "$APP/"
 
-          # ---- OpenAPI & Web
-          cd "$source_dir"
-          pnpm --filter @immich/sdk --filter immich-web --frozen-lockfile --force install
-          unset SHARP_FORCE_GLOBAL_LIBVIPS
+          cp "$APP/package.json" "$APP/bin/"
+          sed -i 's/^start/..\/start/' "$APP/bin/immich-admin"
+
+          cd "$SRC"
+          pnpm --filter @immich/sdk --filter immich-web install --force
           export SHARP_IGNORE_GLOBAL_LIBVIPS=true
           pnpm --filter @immich/sdk --filter immich-web build
-          cp -a web/build "$app_dir/www/"
+          cp -a web/build "$APP/www/"
 
-          # ---- CLI
-          cd "$source_dir"
-          pnpm --filter @immich/sdk --filter @immich/cli --frozen-lockfile install
+          pnpm --filter @immich/sdk --filter @immich/cli install
           pnpm --filter @immich/sdk --filter @immich/cli build
-          pnpm --filter @immich/cli --prod --no-optional deploy "$app_dir/cli"
-          ln -s "$app_dir/cli/bin/immich" "$app_dir/bin/immich"
-
-          # ---- Plugins
-          cd "$source_dir"
-          mise trust --ignore ./mise.toml
-          mise trust ./plugins/mise.toml
-          cd "$source_dir/plugins"
-          mise install
-          mise run build
-          cp -r dist "$plugin_dir/"
-          cp manifest.json "$plugin_dir/"
-
-          # ---- Misc / cleanup
-          cp -a LICENSE "$app_dir/"
-          rm "$app_dir/bin/start.sh"
-
-          # ---- Machine Learning (uv-managed venv)
-          cd "$source_dir/machine-learning"
-          if [ -f "$source_dir/machine-learning/.python-version" ]; then
-            python_version=$(cat "$source_dir/machine-learning/.python-version")
-          else
-            python_version=$(grep "FROM python:" Dockerfile | head -n1 | cut -d':' -f2 | cut -d'-' -f1)
-          fi
-
-          mise use uv@latest
-
-          (
-            export UV_PYTHON_INSTALL_DIR="$ml_dir"
-            uv venv "$ml_dir/venv" --no-cache --link-mode copy --python "$python_version" --managed-python
-            source "$ml_dir/venv/bin/activate"
-            uv sync --no-cache --link-mode copy --active --extra cpu --no-dev
-          )
-
-          cp -a "$source_dir/machine-learning/ann" "$ml_dir/"
-          cp -a "$source_dir/machine-learning/immich_ml" "$ml_dir/"
-
-          # ---- Geodata
-          cd "$geodata_source_dir"
-          curl $CURL_OPTS -LO "https://download.geonames.org/export/dump/cities500.zip"
-          curl $CURL_OPTS -LO "https://download.geonames.org/export/dump/admin1CodesASCII.txt"
-          curl $CURL_OPTS -LO "https://download.geonames.org/export/dump/admin2Codes.txt"
-          curl $CURL_OPTS -LO "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson"
-          unzip cities500.zip
-          cp -a cities500.txt admin1CodesASCII.txt admin2Codes.txt ne_10m_admin_0_countries.geojson "$geodata_dir/"
-          date --iso-8601=seconds | tr -d "\n" > "$geodata_dir/geodata-date.txt"
-
-          # Cleanup sources to shrink artifact
-          rm -rf "$source_dir"
+          pnpm --filter @immich/cli --prod deploy "$APP/cli"
+          ln -sf "$APP/cli/bin/immich" "$APP/bin/immich"
 
       - name: Create tarball
         run: |
-          set -euxo pipefail
           cd "$(dirname ${{ needs.prepare.outputs.install_dir }})"
           tar czf immich-v${{ needs.prepare.outputs.immich_version }}-${{ matrix.debian_version }}.tar.gz "$(basename ${{ needs.prepare.outputs.install_dir }})"
-          mv immich-v${{ needs.prepare.outputs.immich_version }}-${{ matrix.debian_version }}.tar.gz /tmp/
+          mv immich-*.tar.gz /tmp/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: immich-${{ matrix.debian_version }}
-          path: /tmp/immich-v${{ needs.prepare.outputs.immich_version }}-${{ matrix.debian_version }}.tar.gz
+          path: /tmp/*.tar.gz
           compression-level: 6
           retention-days: 7
 
@@ -414,21 +269,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - uses: softprops/action-gh-release@v1
         with:
           tag_name: immich-v${{ needs.prepare.outputs.immich_version }}
           name: immich v${{ needs.prepare.outputs.immich_version }}
           body: |
-            Built by `build_immich.yml` with:
-            immich : `${{ needs.prepare.outputs.immich_version }}`
-            libheif : `${{ needs.prepare.outputs.libheif_version }}`
-            libvips : `${{ needs.prepare.outputs.vips_version }}`
+            Built automatically.
+            immich: ${{ needs.prepare.outputs.immich_version }}
+            libheif: ${{ needs.prepare.outputs.libheif_version }}
+            libvips: ${{ needs.prepare.outputs.vips_version }}
           files: artifacts/**/*
-          draft: false
-          prerelease: false
