@@ -35,7 +35,7 @@ jobs:
       - name: Declare var
         id: declare-var
         run: |
-          # Define directories used across jobs and expose them via $GITHUB_OUTPUT.
+          # Define directories and expose via $GITHUB_OUTPUT.
           INSTALL_DIR="/var/www/immich"
           SOURCE_DIR="$INSTALL_DIR/source"
           VIPS_DIR="$INSTALL_DIR/vips"
@@ -90,7 +90,7 @@ jobs:
         id: check-version
         run: |
           set -euo pipefail
-          # Use a single version tag across matrix; attach per-OS artifacts to the same release.
+          # Single tag for the immich version; matrix artifacts will attach to same release.
           IMMICH_VERSION="${{ steps.get-versions.outputs.immich_version }}"
           TAG_NAME="immich-v${IMMICH_VERSION}"
 
@@ -105,13 +105,11 @@ jobs:
         if: steps.check-version.outputs.should_build == 'true'
         run: |
           set -euo pipefail
-          # Read input when manual, fallback to default when scheduled.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSIONS="${{ github.event.inputs.debian_versions }}"
           else
             VERSIONS="bookworm,trixie"
           fi
-          # Convert CSV -> JSON array for matrix.
           MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
@@ -125,7 +123,6 @@ jobs:
     container:
       image: debian:${{ matrix.debian_version }}-slim
     env:
-      # Build env + curl robustness
       PKG_CONFIG_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
       LD_LIBRARY_PATH: "${{ needs.prepare.outputs.vips_dir }}/lib:${LD_LIBRARY_PATH:-}"
       PATH: "/usr/lib/jellyfin-ffmpeg:$HOME/.local/share/mise/shims:${PATH:-}"
@@ -134,11 +131,9 @@ jobs:
       CURL_OPTS: "--fail --location --retry 3 --retry-delay 2"
 
     steps:
-      # 1) Checkout
       - name: Checkout code
         uses: actions/checkout@v6
 
-      # 2) Node + pnpm store cache
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
@@ -159,7 +154,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
-      # 3) Minimal tools to add external APT repositories
       - name: Install base tools for APT repos
         run: |
           set -euxo pipefail
@@ -167,39 +161,34 @@ jobs:
           apt-get install -y --no-install-recommends curl gpg ca-certificates
           rm -rf /var/lib/apt/lists/*
 
-      # 4) Add Jellyfin repo (FFmpeg build with codecs)
       - name: Add Jellyfin repo
         run: |
           set -euxo pipefail
           mkdir -p /etc/apt/keyrings
           curl $CURL_OPTS https://repo.jellyfin.org/jellyfin_team.gpg.key \
             | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg
-          tee /etc/apt/sources.list.d/jellyfin.sources <<EOF
-Types: deb
-URIs: https://repo.jellyfin.org/debian
-Suites: ${{ matrix.debian_version }}
-Components: main
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/jellyfin.gpg
-EOF
+          repo_file="/etc/apt/sources.list.d/jellyfin.sources"
+          printf "Types: deb\n" > "$repo_file"
+          printf "URIs: https://repo.jellyfin.org/debian\n" >> "$repo_file"
+          printf "Suites: %s\n" "${{ matrix.debian_version }}" >> "$repo_file"
+          printf "Components: main\n" >> "$repo_file"
+          printf "Architectures: %s\n" "$(dpkg --print-architecture)" >> "$repo_file"
+          printf "Signed-By: /etc/apt/keyrings/jellyfin.gpg\n" >> "$repo_file"
 
-      # 5) Add Mise repo (runtime manager)
       - name: Add Mise repo
         run: |
           set -euxo pipefail
           install -d /etc/apt/keyrings
           curl $CURL_OPTS https://mise.jdx.dev/gpg-key.pub \
             | gpg --dearmor -o /etc/apt/keyrings/mise-archive-keyring.gpg
-          tee /etc/apt/sources.list.d/mise.sources <<EOF
-Types: deb
-URIs: https://mise.jdx.dev/deb/
-Suites: ${{ matrix.debian_version }}
-Components: main
-Architectures: $(dpkg --print-architecture)
-Signed-By: /etc/apt/keyrings/mise-archive-keyring.gpg
-EOF
+          repo_file="/etc/apt/sources.list.d/mise.sources"
+          printf "Types: deb\n" > "$repo_file"
+          printf "URIs: https://mise.jdx.dev/deb/\n" >> "$repo_file"
+          printf "Suites: %s\n" "${{ matrix.debian_version }}" >> "$repo_file"
+          printf "Components: main\n" >> "$repo_file"
+          printf "Architectures: %s\n" "$(dpkg --print-architecture)" >> "$repo_file"
+          printf "Signed-By: /etc/apt/keyrings/mise-archive-keyring.gpg\n" >> "$repo_file"
 
-      # 6) Cache & install APT packages (heavy list) in one shot
       - name: Cache and Install APT packages
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -220,14 +209,12 @@ EOF
             jellyfin-ffmpeg mise
           version: 1
 
-      # 7) Reduce layer size; cached pkgs remain available
       - name: Cleanup APT caches
         run: |
           set -euxo pipefail
           apt-get clean
           rm -rf /var/lib/apt/lists/*
 
-      # 8) Cache ccache and enable it
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -246,7 +233,6 @@ EOF
           ccache -M 2G
           ccache -s
 
-      # 9) Create working directories
       - name: Create directories
         run: |
           set -euxo pipefail
@@ -261,7 +247,6 @@ EOF
             ${{ needs.prepare.outputs.geodata_source_dir }} \
             ${{ needs.prepare.outputs.geodata_dir }}
 
-      # 10) Build libheif
       - name: Download and build libheif
         run: |
           set -euxo pipefail
@@ -285,7 +270,6 @@ EOF
             ..
           make -j"$(nproc)" && make install
 
-      # 11) Build libvips
       - name: Download and build libvips
         run: |
           set -euxo pipefail
@@ -302,7 +286,6 @@ EOF
             -Dtiff=disabled
           cd build && ninja install
 
-      # 12) Build immich (server, web, CLI, plugins)
       - name: Download and build immich
         run: |
           set -euxo pipefail
@@ -404,7 +387,6 @@ EOF
           # Cleanup sources to shrink artifact
           rm -rf "$source_dir"
 
-      # 13) Package app into a tarball per OS in matrix
       - name: Create tarball
         run: |
           set -euxo pipefail
@@ -412,7 +394,6 @@ EOF
           tar czf immich-v${{ needs.prepare.outputs.immich_version }}-${{ matrix.debian_version }}.tar.gz "$(basename ${{ needs.prepare.outputs.install_dir }})"
           mv immich-v${{ needs.prepare.outputs.immich_version }}-${{ matrix.debian_version }}.tar.gz /tmp/
 
-      # 14) Upload artifact (zstd compression level + retention)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
