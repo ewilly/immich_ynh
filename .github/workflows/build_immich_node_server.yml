@@ -185,7 +185,6 @@ jobs:
             ${{ needs.prepare.outputs.install_dir }} \
             ${{ needs.prepare.outputs.source_dir }} \
             ${{ needs.prepare.outputs.vips_dir }} \
-            ${{ needs.prepare.outputs.app_dir }} \
             ${{ needs.prepare.outputs.plugin_dir }}
 
       - name: Build libheif
