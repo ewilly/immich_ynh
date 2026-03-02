@@ -230,6 +230,7 @@ jobs:
             libimagequant-dev \
             libraw-dev \
             jq
+            
         - name: Install Jellyfin repo + jellyfin-ffmpeg
           run: |
             set -euxo pipefail
