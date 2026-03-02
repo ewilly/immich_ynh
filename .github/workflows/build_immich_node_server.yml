@@ -137,12 +137,6 @@ jobs:
             libtiff-dev libgif-dev libimagequant-dev libraw-dev jq
           version: 1
 
-      - name: Enable ccache
-        run: |
-          export CC=ccache
-          export CXX=ccache
-          ccache -M 2G
-
       - name: Create dirs
         run: |
           mkdir -p \
