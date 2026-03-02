@@ -15,7 +15,5 @@ jobs:
       image: debian:trixie-slim
     steps:
     - run: |
-        curl https://mise.run | sh
-        echo "$HOME/.local/share/mise/bin" >> $GITHUB_PATH
-        echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
+        curl https://mise.jdx.dev/mise-latest-linux-x64 > /bin/mise && chmod 755 /bin/mise
         echo "mise version: $(mise version --json | jq -r .version)"
