@@ -140,6 +140,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y \
+            bash \
             curl \
             libssl-dev \
             libffi-dev \
@@ -203,6 +204,7 @@ jobs:
 
       - name: Build immich
         id: build-immich
+        shell: bash
         run: |
           set -euxo pipefail
 
@@ -367,7 +369,7 @@ jobs:
               --link-mode copy --python "$python_version" --managed-python
 
             # Activate the venv
-            . "$ml_dir/venv/bin/activate"
+            source "$ml_dir/venv/bin/activate"
 
             # Sync dependencies using uv via mise (Try fast offline first, then fallback for network installs)
             mise exec -- uv sync --offline --locked --active --extra cpu --no-dev || \
