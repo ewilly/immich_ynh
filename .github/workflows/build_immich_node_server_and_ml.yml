@@ -7,7 +7,7 @@ on:
         description: 'Debian versions to build (comma-separated: bookworm, trixie, or bookworm,trixie)'
         required: true
         default: 'trixie'
-  schedule:
+  #schedule:
     # Run daily at 2:00 AM UTC to check for version updates
     # - cron: '0 2 * * *'
 
@@ -104,7 +104,7 @@ jobs:
             VERSIONS="bookworm,trixie"
           fi
 
-          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\s+|\s+$"; ""))')
+          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   build:
