@@ -355,18 +355,24 @@ jobs:
           # Install immich-machine-learning
           echo "::group::🧠 Building immich machine learning..."
           cd "$source_dir/machine-learning"
-            # Install uv
+            
+            # Install uv via mise
             mise use uv@latest --quiet
 
-            # Install with uv in a subshell
-            (
-              export UV_PYTHON_INSTALL_DIR="$ml_dir"
-              uv venv "$ml_dir/venv" \
-                  --no-cache --link-mode copy --python "$python_version" --managed-python
-              source "$ml_dir/venv/bin/activate"
-              uv sync \
-                  --no-cache --link-mode copy --active --extra cpu --no-dev
-            )
+            # Set directory for managed Python
+            export UV_PYTHON_INSTALL_DIR="$ml_dir"
+
+            # Create venv using uv via mise
+            mise run uv venv "$ml_dir/venv" \
+              --link-mode copy --python "$python_version" --managed-python
+
+            # Activate the venv
+            source "$ml_dir/venv/bin/activate"
+
+            # Sync dependencies using uv via mise (Try fast offline first, then fallback for network installs)
+            mise run uv sync --offline --active --extra cpu --no-dev || \
+              mise run uv sync --active --extra cpu --no-dev
+
 
             # Copy built files
             cp -a "$source_dir/machine-learning/ann" "$ml_dir/"
