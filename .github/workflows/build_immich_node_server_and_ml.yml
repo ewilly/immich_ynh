@@ -104,7 +104,7 @@ jobs:
             VERSIONS="bookworm,trixie"
           fi
 
-          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+          MATRIX=$(echo "$VERSIONS" | jq -R -s -c 'split(",") | map(gsub("^\s+|\s+$"; ""))')
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   build:
@@ -415,7 +415,6 @@ jobs:
           mv immich-*.tar.gz /tmp/
           echo "::endgroup::"
 
-
       - name: Create versions JSON
         run: |
           echo "::group::📝 Creating the json file"
@@ -473,6 +472,5 @@ jobs:
               Execution time: ${{ needs.build.outputs.exec_time }}
               Peak RAM used:  ${{ needs.build.outputs.peak_ram }}
               Disk space used: ${{ needs.build.outputs.disk_used }}
-
 
           files: artifacts/**/*
