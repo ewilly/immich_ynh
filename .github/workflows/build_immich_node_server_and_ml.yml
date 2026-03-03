@@ -363,15 +363,15 @@ jobs:
             export UV_PYTHON_INSTALL_DIR="$ml_dir"
 
             # Create venv using uv via mise
-            mise x uv -- venv "$ml_dir/venv" \
+            mise exec uv -- venv "$ml_dir/venv" \
               --link-mode copy --python "$python_version" --managed-python
 
             # Activate the venv
             source "$ml_dir/venv/bin/activate"
 
             # Sync dependencies using uv via mise (Try fast offline first, then fallback for network installs)
-            mise x uv -- sync --offline --locked --active --extra cpu --no-dev || \
-              mise x uv -- sync --locked --active --extra cpu --no-dev
+            mise exec uv -- sync --offline --locked --active --extra cpu --no-dev || \
+              mise exec uv -- sync --locked --active --extra cpu --no-dev
 
             # Copy built files
             cp -a "$source_dir/machine-learning/ann" "$ml_dir/"
