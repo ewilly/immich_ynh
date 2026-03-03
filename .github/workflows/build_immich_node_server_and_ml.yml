@@ -373,7 +373,6 @@ jobs:
             mise x uv -- sync --offline --locked --active --extra cpu --no-dev || \
               mise x uv -- sync --locked --active --extra cpu --no-dev
 
-
             # Copy built files
             cp -a "$source_dir/machine-learning/ann" "$ml_dir/"
             cp -a "$source_dir/machine-learning/immich_ml" "$ml_dir/"
