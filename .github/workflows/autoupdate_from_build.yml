@@ -116,4 +116,9 @@ jobs:
 
           - \`version\` → \`${VERSION}~ynh1\`
           - \`resources.nodejs.version\`
-          - urls & sha256 \`immich_prebuilt_bookworm\` / \`immich_prebuilt_trixie\` (amd64 + arm64)"
+          - urls & sha256 \`immich_prebuilt_bookworm\` / \`immich_prebuilt_trixie\` (amd64 + arm64)
+
+          Before merging, please have a look at:
+          - \`[resources.sources.vchord]\`: https://github.com/immich-app/base-images/blob/main/postgres/versions.yaml and https://github.com/immich-app/base-images/blob/main/postgres/versions.yaml#L9
+          - \`[resources.apt.extras.jellyfin-ffmpeg]\`: https://github.com/immich-app/immich/blob/main/mise.toml#L31
+          "
