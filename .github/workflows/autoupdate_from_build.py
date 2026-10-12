@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
-"""Met à jour manifest.toml depuis le manifest.json d'une release immich-build.
-
-À placer dans .github/workflows/autoupdate_from_build.py
+"""
+Update manifest.toml with manifest.json of last immich-build release.
 
 Usage:
     autoupdate_from_build.py --upstream-manifest upstream-manifest.json \
                              --manifest manifest.toml \
                              [--force]
-
-Sortie (GITHUB_OUTPUT si défini, sinon stdout):
-    updated=true|false
-    old_version=X.Y.Z
-    new_version=X.Y.Z
-
-Le remplacement se fait par substitution de chaînes (et non par réécriture
-TOML) afin de préserver tabulations, commentaires et ordre des clés.
 """
 
 import argparse
@@ -25,7 +16,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-# (clé dans le manifest.json, nom de la source dans manifest.toml)
+# Var
 SUITES = [
     ("bookworm", "immich_prebuilt_bookworm"),
     ("trixie", "immich_prebuilt_trixie"),
@@ -34,10 +25,10 @@ ARCHES = ["amd64", "arm64"]
 
 
 def version_tuple(version: str) -> tuple[int, ...]:
-    """'3.3.10' -> (3, 3, 10). Comparaison numérique, pas lexicographique."""
+    """'3.3.10' -> (3, 3, 10). Numerical comparaison."""
     parts = [p for p in re.split(r"[.\-]", version) if p.isdigit()]
     if not parts:
-        sys.exit(f"Version non comparable : '{version}'")
+        sys.exit(f"Non comparable version: '{version}'")
     return tuple(int(p) for p in parts)
 
 
@@ -52,7 +43,7 @@ def set_output(**values: str) -> None:
 
 
 def build_replacements(manifest: dict, upstream: dict) -> list[tuple[str, str]]:
-    """Liste des (ancienne valeur, nouvelle valeur) à substituer."""
+    """List of (old value, new value) to substitute."""
     resources = manifest["resources"]
     sources = resources["sources"]
 
@@ -78,7 +69,7 @@ def bump_version(content: str, new_version: str) -> str:
         count=1,
     )
     if count != 1:
-        sys.exit("Impossible de localiser la clé 'version' dans manifest.toml")
+        sys.exit("Can't find the key 'version' in manifest.toml")
     return content
 
 
@@ -88,22 +79,22 @@ def main() -> None:
         "--upstream-manifest",
         type=Path,
         default=Path("upstream-manifest.json"),
-        help="manifest.json téléchargé depuis la release immich-build",
+        help="manifest.json asset dowloaded from last immich-build release",
     )
     parser.add_argument(
         "--manifest",
         type=Path,
         default=Path("manifest.toml"),
-        help="manifest.toml du paquet à mettre à jour",
+        help="manifest.toml to update",
     )
     parser.add_argument(
         "--new-version",
-        help="Version amont. Par défaut, lue dans la clé 'immich_version'.",
+        help="Immich-build version. Default is the 'immich_version' key.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Mettre à jour même si la version locale est >= à la version amont",
+        help="Update even if immich_ynh version is >= to immich-build version",
     )
     args = parser.parse_args()
 
@@ -118,7 +109,7 @@ def main() -> None:
     print(f"immich-build  : {new_version}")
 
     if not args.force and version_tuple(old_version) >= version_tuple(new_version):
-        print("Déjà à jour, rien à faire.")
+        print("Already up-to-date, nothing to do.")
         set_output(updated="false", old_version=old_version, new_version=new_version)
         return
 
@@ -126,13 +117,13 @@ def main() -> None:
         if old == new:
             continue
         if old not in raw:
-            sys.exit(f"Valeur introuvable dans manifest.toml : {old}")
+            sys.exit(f"Unable to find the value in manifest.toml : {old}")
         raw = raw.replace(old, new)
 
     raw = bump_version(raw, new_version)
     args.manifest.write_text(raw, encoding="utf-8")
 
-    print(f"manifest.toml mis à jour : {old_version} -> {new_version}~ynh1")
+    print(f"manifest.toml updated : {old_version} -> {new_version}~ynh1")
     set_output(updated="true", old_version=old_version, new_version=new_version)
 
 

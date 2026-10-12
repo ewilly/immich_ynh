@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Forcer la mise à jour même si la version locale est à jour"
+        description: "Force the update even if immich_ynh current version is already up-to-date"
         type: boolean
         default: false
 
@@ -28,7 +28,7 @@ jobs:
           ref: testing
           fetch-depth: 0
 
-      - name: Récupérer le manifest.json de la dernière release amont
+      - name: Get the manifest.json from last release of immich-build
         id: upstream
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -38,7 +38,11 @@ jobs:
           tag=$(gh release list --repo "$BUILD_REPO" --limit 30 \
                   --json tagName,isDraft,isPrerelease \
                   --jq '[.[] | select(.isDraft==false and .isPrerelease==false)][0].tagName')
-          [ -n "$tag" ] || { echo "Aucune release exploitable sur $BUILD_REPO"; exit 1; }
+          if [ -z "$tag" ]
+          then
+            echo "Can't find release on $BUILD_REPO"
+            exit 1
+          fi
           echo "Tag amont : $tag"
 
           version="${tag#immich-v}"
@@ -49,7 +53,7 @@ jobs:
           echo "tag=$tag"         >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Comparer les versions et éditer manifest.toml
+      - name: Compare versions and edit the manifest.toml
         id: edit
         run: |
           python3 .github/workflows/autoupdate_from_build.py \
@@ -58,7 +62,7 @@ jobs:
             --new-version "${{ steps.upstream.outputs.version }}" \
             ${{ inputs.force && '--force' || '' }}
 
-      - name: Commit sur la branche autoupdate-{version}
+      - name: Commit on branch autoupdate-{version}
         if: steps.edit.outputs.updated == 'true'
         env:
           VERSION: ${{ steps.upstream.outputs.version }}
@@ -81,13 +85,13 @@ jobs:
           git add manifest.toml
           if git diff --cached --quiet
           then
-            echo "Aucun changement à committer."
+            echo "Nothing to commit."
             exit 0
           fi
           git commit -m "Upgrade to v${VERSION} (sources from immich-build)"
           git push --set-upstream origin "$branch"
 
-      - name: Créer la Pull Request
+      - name: Create the Pull Request
         if: steps.edit.outputs.updated == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -99,17 +103,17 @@ jobs:
           branch="autoupdate-${VERSION}"
           if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]
           then
-            echo "PR déjà ouverte pour $branch."
+            echo "PR already exiting for $branch."
             exit 0
           fi
           gh pr create \
             --base "$BASE_BRANCH" \
             --head "$branch" \
             --title "Upgrade to v${VERSION}" \
-            --body "Mise à jour automatique ${OLD_VERSION} → ${VERSION}.
+            --body "Automatic update from immich-build ${OLD_VERSION} to ${VERSION}.
 
-          Source → https://github.com/${BUILD_REPO}/releases/tag/${TAG}
+          Source: https://github.com/${BUILD_REPO}/releases/tag/${TAG}
 
           - \`version\` → \`${VERSION}~ynh1\`
           - \`resources.nodejs.version\`
-          - urls et sha256 \`immich_prebuilt_bookworm\` / \`immich_prebuilt_trixie\` (amd64 + arm64)"
+          - urls & sha256 \`immich_prebuilt_bookworm\` / \`immich_prebuilt_trixie\` (amd64 + arm64)"
