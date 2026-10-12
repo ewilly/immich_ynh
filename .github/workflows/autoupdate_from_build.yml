@@ -92,6 +92,7 @@ jobs:
           git push --set-upstream origin "$branch"
 
       - name: Create the Pull Request
+        id: create_pr
         if: steps.edit.outputs.updated == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -106,7 +107,8 @@ jobs:
             echo "PR already exiting for $branch."
             exit 0
           fi
-          gh pr create \
+
+          PR_URL=$(gh pr create \
             --base "$BASE_BRANCH" \
             --head "$branch" \
             --title "Upgrade to v${VERSION}" \
@@ -121,4 +123,12 @@ jobs:
           Before merging, please have a look at:
           - \`[resources.sources.vchord]\`: https://github.com/immich-app/base-images/blob/main/postgres/versions.yaml and https://github.com/immich-app/base-images/blob/main/postgres/versions.yaml#L9
           - \`[resources.apt.extras.jellyfin-ffmpeg]\`: https://github.com/immich-app/immich/blob/main/mise.toml#L31
-          "
+          ")
+
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+
+      - name: Add a comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ steps.create_pr.outputs.pr_url }}" --body "!testme"
